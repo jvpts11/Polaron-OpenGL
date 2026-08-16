@@ -1,0 +1,121 @@
+import System.Memory.Allocator;
+import System.Memory.Raw;
+
+program PolaronOpenGL;
+
+// Rasterize a monospace font into a glyph atlas via GDI.
+//
+// A code editor needs crisp system text. GDI (gdi32, already linked) rasterizes a TrueType face into a
+// memory DIB with grayscale anti-aliasing; rasterizeAscii lays the printable ASCII range out in a grid
+// and reads the DIB back into an RGBA buffer where every glyph is white and alpha is the coverage -- so
+// the caller tints per-token colour in the shader. No C, no third-party font library.
+public bundle OpenGL {
+    public namespace Text {
+
+        public class GdiFont {
+            private static final int FIRST_CHAR = 32;    // space
+            private static final int CHAR_COUNT = 95;    // through '~'
+            private static final int COLUMNS = 16;
+
+            // Rasterize printable ASCII (32..126) of `faceName` at `pixelHeight` px into a glyph atlas.
+            public static method rasterizeAscii(String faceName, int pixelHeight) returns FontAtlas* {
+                long hdc = Gdi32.CreateCompatibleDC(0);
+
+                // --- LOGFONTW (92 bytes): negative height = character height, monospace, grayscale AA ---
+                address lf = Allocator.alloc(92);
+                GdiFont.zero(lf, 92);
+                Raw.write<int>(lf, 0 - pixelHeight);                       // lfHeight
+                Raw.write<int>(lf + cast<address>(16), 400);               // lfWeight = FW_NORMAL
+                Raw.write<byte>(lf + cast<address>(23), cast<byte>(1));    // lfCharSet = DEFAULT_CHARSET
+                Raw.write<byte>(lf + cast<address>(26), cast<byte>(4));    // lfQuality = ANTIALIASED_QUALITY
+                Raw.write<byte>(lf + cast<address>(27), cast<byte>(49));   // FIXED_PITCH | FF_MODERN
+                mutable int fi = 0;
+                while (fi < faceName.length() && fi < 31) {
+                    Raw.write<byte>(lf + cast<address>(28 + fi * 2), cast<byte>(cast<int>(faceName.charAt(fi))));
+                    Raw.write<byte>(lf + cast<address>(28 + fi * 2 + 1), cast<byte>(0));
+                    fi = fi + 1;
+                }
+                long hfont = Gdi32.CreateFontIndirectW(cast<long>(lf));
+                Allocator.free(lf);
+                Gdi32.SelectObject(hdc, hfont);
+
+                // --- metrics (TEXTMETRICW): tmHeight@0, tmAscent@4, tmAveCharWidth@20, tmMaxCharWidth@24 ---
+                address tm = Allocator.alloc(64);
+                GdiFont.zero(tm, 64);
+                Gdi32.GetTextMetricsW(hdc, cast<long>(tm));
+                int cellH = Raw.read<int>(tm + cast<address>(0));
+                int ascent = Raw.read<int>(tm + cast<address>(4));
+                int tmAve = Raw.read<int>(tm + cast<address>(20));
+                int tmMax = Raw.read<int>(tm + cast<address>(24));
+                Allocator.free(tm);
+                // Monospace advance is tmAveCharWidth; tmMaxCharWidth can be ~2x it (a wide outlier glyph)
+                // and would double-space the text. Every ASCII glyph fits in the advance for a fixed-pitch
+                // face, so the cell width is the advance.
+                mutable int cellW = tmAve;
+                if (cellW <= 0) { cellW = tmMax; }
+
+                int rows = (GdiFont.CHAR_COUNT + GdiFont.COLUMNS - 1) / GdiFont.COLUMNS;
+                int aw = GdiFont.COLUMNS * cellW;
+                int ah = rows * cellH;
+
+                // --- 32bpp top-down DIB section ---
+                address bmi = Allocator.alloc(44);
+                GdiFont.zero(bmi, 44);
+                Raw.write<int>(bmi, 40);                      // biSize
+                Raw.write<int>(bmi + cast<address>(4), aw);   // biWidth
+                Raw.write<int>(bmi + cast<address>(8), 0 - ah);   // biHeight (< 0 = top-down)
+                Raw.write<byte>(bmi + cast<address>(12), cast<byte>(1));    // biPlanes = 1
+                Raw.write<byte>(bmi + cast<address>(14), cast<byte>(32));   // biBitCount = 32
+                address ppv = Allocator.alloc(8);
+                Raw.write<long>(ppv, 0);
+                long hbm = Gdi32.CreateDIBSection(hdc, cast<long>(bmi), 0, cast<long>(ppv), 0, 0);
+                long bits = Raw.read<long>(ppv);
+                Allocator.free(bmi);
+                Allocator.free(ppv);
+                Gdi32.SelectObject(hdc, hbm);
+
+                // --- draw the glyphs: white on the zeroed (black) DIB, transparent background ---
+                Gdi32.SetBkMode(hdc, 1);                 // TRANSPARENT
+                Gdi32.SetTextColor(hdc, 16777215);       // 0x00FFFFFF white (0x00BBGGRR)
+                address ch = Allocator.alloc(4);
+                mutable int i = 0;
+                while (i < GdiFont.CHAR_COUNT) {
+                    int c = GdiFont.FIRST_CHAR + i;
+                    int col = i % GdiFont.COLUMNS;
+                    int row = i / GdiFont.COLUMNS;
+                    Raw.write<byte>(ch, cast<byte>(c));           // UTF-16 low byte
+                    Raw.write<byte>(ch + cast<address>(1), cast<byte>(0));
+                    Gdi32.TextOutW(hdc, col * cellW, row * cellH, cast<long>(ch), 1);
+                    i = i + 1;
+                }
+                Allocator.free(ch);
+                Gdi32.GdiFlush();
+
+                // --- read the DIB into RGBA: white, alpha = coverage (blue channel of grayscale AA) ---
+                int total = aw * ah;
+                byte[] rgba = new byte[total * 4]();
+                mutable int p = 0;
+                while (p < total) {
+                    byte cov = Raw.read<byte>(cast<address>(bits) + cast<address>(p * 4));
+                    rgba[p * 4] = cast<byte>(255);
+                    rgba[p * 4 + 1] = cast<byte>(255);
+                    rgba[p * 4 + 2] = cast<byte>(255);
+                    rgba[p * 4 + 3] = cov;
+                    p = p + 1;
+                }
+
+                Gdi32.DeleteObject(hbm);
+                Gdi32.DeleteObject(hfont);
+                Gdi32.DeleteDC(hdc);
+
+                return new FontAtlas(rgba, aw, ah, cellW, cellH, GdiFont.COLUMNS,
+                                     GdiFont.FIRST_CHAR, GdiFont.CHAR_COUNT, ascent) on heap;
+            }
+
+            private static method zero(address a, int n) returns void {
+                mutable int z = 0;
+                while (z < n) { Raw.write<byte>(a + cast<address>(z), cast<byte>(0)); z = z + 1; }
+            }
+        }
+    }
+}

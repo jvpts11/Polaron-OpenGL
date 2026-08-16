@@ -1,0 +1,13 @@
+program PolaronOpenGL;
+
+// A Win32 RECT, filled by GetClientRect. Kept by the window and reused, because width() and height()
+// are per-frame calls and each one would otherwise allocate.
+public bundle OpenGL {
+    public namespace Windowing {
+
+        public struct Rect {
+            public mutable int left;   public mutable int top;
+            public mutable int right;  public mutable int bottom;
+        }
+    }
+}

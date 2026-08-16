@@ -1,0 +1,19 @@
+import System.Math.Numerics;
+
+program PolaronOpenGL;
+
+// The vector operations that belong to no particular vector: a factory, and the length of three loose
+// floats for the callers that have not built a GlVec3 and do not need one.
+public bundle OpenGL {
+    public namespace Geometry {
+
+        public class GlVec {
+            public static method make(float x, float y, float z) returns GlVec3 {
+                return new GlVec3(x, y, z) on heap;
+            }
+            public static method length3(float x, float y, float z) returns float {
+                return cast<float>(Numerics.sqrt(cast<double>(x * x + y * y + z * z)));
+            }
+        }
+    }
+}

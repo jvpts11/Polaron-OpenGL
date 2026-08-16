@@ -1,0 +1,16 @@
+program PolaronOpenGL;
+
+// The mouse cursor for the client area. The window used to take this as an `int` -- 0 through 4, with
+// the meanings in a comment -- so `setCursor(3)` was a legal thing to write and a wrong thing to read.
+public bundle OpenGL {
+    public namespace Windowing {
+
+        public enum CursorKind {
+            ARROW,     // chrome and everything with no better answer
+            IBEAM,     // over an editable text region
+            HAND,      // over something clickable: a fold chevron, a breakpoint gutter
+            RESIZE_H,  // over a horizontal resize divider
+            RESIZE_V   // over a vertical resize divider
+        }
+    }
+}

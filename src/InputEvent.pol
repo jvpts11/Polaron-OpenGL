@@ -1,0 +1,27 @@
+program PolaronOpenGL;
+
+// One decoded keyboard event, drained from the window's queue. A character event carries the codepoint
+// in `code`; a key event carries the Win32 virtual-key in `vk` and says whether the OS is auto-repeating
+// it. `NONE` is what an empty queue answers.
+public bundle OpenGL {
+    public namespace Windowing {
+
+        public class InputEvent {
+            public mutable EventKind kind;
+            public mutable int code;
+            public mutable int vk;
+            public mutable boolean repeat;
+
+            public constructor InputEvent(EventKind kind, int code, int vk, boolean repeat) {
+                this.kind = kind;
+                this.code = code;
+                this.vk = vk;
+                this.repeat = repeat;
+            }
+
+            public method isChar() returns boolean { return this.kind == EventKind.CHARACTER; }
+            public method isKey() returns boolean { return this.kind == EventKind.KEY; }
+            public method isNone() returns boolean { return this.kind == EventKind.NONE; }
+        }
+    }
+}

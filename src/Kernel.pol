@@ -1,0 +1,15 @@
+program PolaronOpenGL;
+
+// The handful of kernel32 entry points the window needs: the module handle a window class is registered
+// against, and the dynamic loading that fetches the OS's own window procedure.
+public bundle OpenGL {
+    public namespace Windowing {
+
+        public class Kernel library Kernel32 {
+            public extern cdecl static method GetModuleHandleA(long name) returns long;
+            public extern cdecl static method LoadLibraryA(string name) returns long;
+            public extern cdecl static method GetProcAddress(long mod, string name) returns long;
+            public extern cdecl static method Sleep(int ms) returns void;
+        }
+    }
+}

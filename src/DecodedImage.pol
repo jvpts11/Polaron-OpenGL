@@ -1,0 +1,37 @@
+import System.Memory.Allocator;
+
+program PolaronOpenGL;
+
+// The result of decoding an image file: a tight, top-down pixel buffer and its dimensions. GDI+ hands
+// back rows padded to a multiple of four bytes, so "the pixels" is not the same thing as "what the
+// decoder wrote", and something has to hold the packed copy until it has been uploaded.
+//
+// It exists because the two decode paths -- 24bpp for an opaque texture, 32bpp when the alpha matters --
+// were the same forty lines twice, differing in two constants. Three values had to come back from that
+// work, and three values that travel together are a type.
+public bundle OpenGL {
+    public namespace Textures {
+
+        public class DecodedImage {
+            public mutable address pixels;
+            public mutable int width;
+            public mutable int height;
+
+            public constructor DecodedImage(address pixels, int width, int height) {
+                this.pixels = pixels;
+                this.width = width;
+                this.height = height;
+            }
+
+            // False when the file could not be read or decoded; the dimensions are then meaningless.
+            public method ok() returns boolean { return this.pixels != cast<address>(0); }
+
+            // Release the packed buffer. Not a destructor: the buffer is a raw address, so a copy of this
+            // object would carry the same one and a destructor would free it out from under the copy.
+            public method dispose() returns void {
+                if (this.ok()) { Allocator.free(this.pixels); }
+                this.pixels = cast<address>(0);
+            }
+        }
+    }
+}

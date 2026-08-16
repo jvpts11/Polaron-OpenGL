@@ -1,0 +1,18 @@
+[polaron_project]
+
+[program]
+name = "triangle"
+version = "1.0.0"
+language_version = "1.0"
+entry = "src/Main.pol"
+
+# Nothing about opengl32, gdi32 or user32 here on purpose: every class in the library names the foreign
+# library it comes from, and the library's own manifest maps that name to a file. A consumer that had to
+# repeat the list would be keeping somebody else's secret.
+[dependencies]
+Polaron-OpenGL = { path = "../.." }
+
+[build]
+output = "build-output/"
+target = "x86_64-windows"
+freestanding = false

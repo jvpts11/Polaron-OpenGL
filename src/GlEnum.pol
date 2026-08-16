@@ -1,0 +1,85 @@
+program PolaronOpenGL;
+
+// The OpenGL enumerants, named so callers write GlEnum.ARRAY_BUFFER rather than 0x8892. Values are the
+// canonical GLenum constants; combine the buffer-bit masks with `|`
+// (GlEnum.COLOR_BUFFER_BIT | GlEnum.DEPTH_BUFFER_BIT).
+//
+// The class used to be called `GL`, one letter of case away from `Gl`, the loader. Two types whose names
+// differ only in case cannot live in one directory on Windows -- the files collide -- and, more to the
+// point, a reader should not have to notice a capital to know which one a line is talking about.
+public bundle OpenGL {
+    public namespace Core {
+
+        public class GlEnum {
+            // glClear masks
+            public static final int DEPTH_BUFFER_BIT = 0x0100;
+            public static final int COLOR_BUFFER_BIT = 0x4000;
+            // glEnable / glDisable capabilities
+            public static final int DEPTH_TEST = 0x0B71;
+            public static final int CULL_FACE = 0x0B44;
+            public static final int BLEND = 0x0BE2;
+            public static final int SCISSOR_TEST = 0x0C11;
+            // primitive modes
+            public static final int POINTS = 0x0000;
+            public static final int LINES = 0x0001;
+            public static final int TRIANGLES = 0x0004;
+            // data types
+            public static final int BYTE = 0x1400;
+            public static final int UNSIGNED_BYTE = 0x1401;
+            public static final int SHORT = 0x1402;
+            public static final int UNSIGNED_SHORT = 0x1403;
+            public static final int INT = 0x1404;
+            public static final int UNSIGNED_INT = 0x1405;
+            public static final int FLOAT = 0x1406;
+            // pixel formats
+            public static final int RGB = 0x1907;
+            public static final int RGBA = 0x1908;
+            public static final int BGR = 0x80E0;
+            public static final int BGRA = 0x80E1;
+            public static final int DEPTH_COMPONENT = 0x1902;
+            public static final int DEPTH_COMPONENT24 = 0x81A6;
+            // framebuffer objects and their attachment points
+            public static final int FRAMEBUFFER = 0x8D40;
+            public static final int RENDERBUFFER = 0x8D41;
+            public static final int COLOR_ATTACHMENT0 = 0x8CE0;
+            public static final int DEPTH_ATTACHMENT = 0x8D00;
+            public static final int FRAMEBUFFER_COMPLETE = 0x8CD5;
+            // buffer targets + usage
+            public static final int ARRAY_BUFFER = 0x8892;
+            public static final int ELEMENT_ARRAY_BUFFER = 0x8893;
+            public static final int UNIFORM_BUFFER = 0x8A11;
+            public static final int STREAM_DRAW = 0x88E0;
+            public static final int STATIC_DRAW = 0x88E4;
+            public static final int DYNAMIC_DRAW = 0x88E8;
+            // textures
+            public static final int TEXTURE_2D = 0x0DE1;
+            public static final int TEXTURE0 = 0x84C0;
+            public static final int TEXTURE1 = 0x84C1;
+            public static final int TEXTURE2 = 0x84C2;
+            public static final int TEXTURE3 = 0x84C3;
+            public static final int TEXTURE_MAG_FILTER = 0x2800;
+            public static final int TEXTURE_MIN_FILTER = 0x2801;
+            public static final int TEXTURE_WRAP_S = 0x2802;
+            public static final int TEXTURE_WRAP_T = 0x2803;
+            public static final int NEAREST = 0x2600;
+            public static final int LINEAR = 0x2601;
+            public static final int LINEAR_MIPMAP_LINEAR = 0x2703;
+            public static final int REPEAT = 0x2901;
+            public static final int CLAMP_TO_EDGE = 0x812F;
+            // pixel store
+            public static final int UNPACK_ALIGNMENT = 0x0CF5;
+            public static final int PACK_ALIGNMENT = 0x0D05;
+            // depth funcs
+            public static final int LESS = 0x0201;
+            public static final int LEQUAL = 0x0203;
+            // blend factors
+            public static final int SRC_ALPHA = 0x0302;
+            public static final int ONE_MINUS_SRC_ALPHA = 0x0303;
+            // shader objects
+            public static final int FRAGMENT_SHADER = 0x8B30;
+            public static final int VERTEX_SHADER = 0x8B31;
+            public static final int COMPILE_STATUS = 0x8B81;
+            public static final int LINK_STATUS = 0x8B82;
+        }
+    }
+}

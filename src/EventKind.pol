@@ -1,0 +1,14 @@
+program PolaronOpenGL;
+
+// What a drained input event is. This was an `int` field carrying 0, 1 and -1, and three predicate
+// methods existed to hide that from readers -- which is the shape of a type that was never written down.
+public bundle OpenGL {
+    public namespace Windowing {
+
+        public enum EventKind {
+            CHARACTER,   // a typed character: `code` is the codepoint
+            KEY,         // a non-character key press: `vk` is the Win32 virtual-key
+            NONE         // the empty sentinel returned when the queue is drained
+        }
+    }
+}

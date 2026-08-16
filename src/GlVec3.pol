@@ -1,0 +1,33 @@
+import System.Math.Numerics;
+
+program PolaronOpenGL;
+
+// A 3-component vector with value-style arithmetic -- the GLM-equivalent, in the part of it a renderer
+// actually uses. The arithmetic operators return a fresh vector so `a + b`, `a - b` and `v * s` read like
+// the math they express; addScaled mutates in place for the hot path (pos.addScaled(vel, dt)) where a
+// fresh allocation each frame is waste.
+public bundle OpenGL {
+    public namespace Geometry {
+
+        public class GlVec3 {
+            public mutable float x; public mutable float y; public mutable float z;
+            public constructor GlVec3(float x, float y, float z) { this.x = x; this.y = y; this.z = z; }
+
+            public operator + (GlVec3 o) returns GlVec3 { return new GlVec3(this.x + o.x, this.y + o.y, this.z + o.z) on heap; }
+            public operator - (GlVec3 o) returns GlVec3 { return new GlVec3(this.x - o.x, this.y - o.y, this.z - o.z) on heap; }
+            public operator * (float s) returns GlVec3 { return new GlVec3(this.x * s, this.y * s, this.z * s) on heap; }
+
+            public method dot(GlVec3 o) returns float { return this.x * o.x + this.y * o.y + this.z * o.z; }
+            public method length() returns float { return cast<float>(Numerics.sqrt(cast<double>(this.dot(this)))); }
+            public method normalized() returns GlVec3 {
+                float l = this.length();
+                if (l < 0.000001) { return new GlVec3(0.0, 0.0, 0.0) on heap; }
+                return new GlVec3(this.x / l, this.y / l, this.z / l) on heap;
+            }
+            // In-place: this += o * s. No allocation -- use it in per-frame integration.
+            public method addScaled(GlVec3 o, float s) returns void {
+                this.x = this.x + o.x * s; this.y = this.y + o.y * s; this.z = this.z + o.z * s;
+            }
+        }
+    }
+}

@@ -1,0 +1,96 @@
+import OpenGL.Core.Gl;
+import OpenGL.Core.GlEnum;
+import System.IO.Console;
+import System.IO.Files;
+import System.Collections.ArrayList;
+import System.Text.StringBuilder;
+import System.Memory.Allocator;
+import System.Memory.Raw;
+
+program PolaronOpenGL;
+
+// Compile and link GLSL programs.
+//
+// Shaders live in their own .vert/.frag files (as they should), loaded from disk here, compiled, and
+// linked into a program. Compile and link errors are reported with the driver's own info log. The char**
+// that glShaderSource wants is marshalled through a small native buffer.
+public bundle OpenGL {
+    public namespace Shaders {
+
+        public class Shader {
+            // Read a whole text file into one String (joining lines with '\n').
+            public static method readFile(String path) returns String {
+                ArrayList<String> lines = Files.readLines(path);
+                mutable StringBuilder* sb = new StringBuilder() on heap;
+                mutable int i = 0;
+                while (i < lines.size()) { sb.append(lines.get(i)).append("\n"); i = i + 1; }
+                String source = sb.toString();
+                delete sb;
+                delete lines;
+                return source;
+            }
+
+            // Compile one stage from source; returns the shader id (0 on failure, log printed).
+            public static method compile(Gl* gl, int stage, String src) returns int {
+                int sh = gl.createShader(stage);
+                int n = src.length();
+                address buf = Allocator.alloc(cast<long>(n + 1));
+                Raw.writeString(buf, src);
+                Raw.write<byte>(buf + cast<address>(n), cast<byte>(0));
+                address pp = Allocator.alloc(8); Raw.write<long>(pp, cast<long>(buf));
+                gl.shaderSource(sh, 1, cast<long>(pp), 0);
+                gl.compileShader(sh);
+                address ok = Allocator.alloc(4);
+                gl.getShaderiv(sh, GlEnum.COMPILE_STATUS, cast<long>(ok));
+                int status = Raw.read<int>(ok);
+                Allocator.free(ok); Allocator.free(pp); Allocator.free(buf);
+                if (status == 0) {
+                    address logBuf = Allocator.alloc(1024);
+                    gl.getShaderInfoLog(sh, 1023, 0, cast<long>(logBuf));
+                    System.IO.Console.printf("glsl: shader compile failed: ");
+                    Shader.printCStr(logBuf); System.IO.Console.printf("\n");
+                    Allocator.free(logBuf);
+                }
+                return sh;
+            }
+
+            // Build a program from vertex + fragment source strings.
+            public static method fromSource(Gl* gl, String vs, String fs) returns int {
+                int v = Shader.compile(gl, GlEnum.VERTEX_SHADER, vs);
+                int f = Shader.compile(gl, GlEnum.FRAGMENT_SHADER, fs);
+                int p = gl.createProgram();
+                gl.attachShader(p, v); gl.attachShader(p, f);
+                gl.linkProgram(p);
+                address ok = Allocator.alloc(4);
+                gl.getProgramiv(p, GlEnum.LINK_STATUS, cast<long>(ok));
+                if (Raw.read<int>(ok) == 0) {
+                    address logBuf = Allocator.alloc(1024);
+                    gl.getProgramInfoLog(p, 1023, 0, cast<long>(logBuf));
+                    System.IO.Console.printf("glsl: program link failed: ");
+                    Shader.printCStr(logBuf); System.IO.Console.printf("\n");
+                    Allocator.free(logBuf);
+                }
+                Allocator.free(ok);
+                gl.deleteShader(v); gl.deleteShader(f);
+                return p;
+            }
+
+            // Build a program from vertex + fragment shader files.
+            public static method fromFiles(Gl* gl, String vertPath, String fragPath) returns int {
+                return Shader.fromSource(gl, Shader.readFile(vertPath), Shader.readFile(fragPath));
+            }
+
+            // Print the driver's NUL-terminated log. It arrives as bytes in memory the driver filled, so
+            // it is walked a byte at a time rather than turned into a String first.
+            private static method printCStr(address p) returns void {
+                mutable int i = 0;
+                while (i < 1023) {
+                    int b = cast<int>(Raw.read<byte>(p + cast<address>(i))) & 0xFF;
+                    if (b == 0) { break; }
+                    System.IO.Console.printf("%c", b);
+                    i = i + 1;
+                }
+            }
+        }
+    }
+}

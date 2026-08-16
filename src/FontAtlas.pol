@@ -1,0 +1,54 @@
+program PolaronOpenGL;
+
+// A rasterized monospace atlas: an RGBA pixel buffer (white glyphs, alpha = coverage) laid out as a
+// `cols`-wide grid of `cellW` x `cellH` cells covering `count` characters starting at code `first`.
+//
+// The atlas owns its pixels and frees them when it dies -- the buffer is a Polaron array, so a copy of
+// the atlas carries its own, and the destructor has nothing to fight over.
+public bundle OpenGL {
+    public namespace Text {
+
+        public class FontAtlas {
+            public mutable byte[] pixels;
+            public mutable int atlasW;
+            public mutable int atlasH;
+            public mutable int cellW;
+            public mutable int cellH;
+            public mutable int cols;
+            public mutable int first;
+            public mutable int count;
+            public mutable int ascent;
+
+            public constructor FontAtlas(byte[] pixels, int atlasW, int atlasH, int cellW, int cellH,
+                                         int cols, int first, int count, int ascent) {
+                this.pixels = pixels;
+                this.atlasW = atlasW;
+                this.atlasH = atlasH;
+                this.cellW = cellW;
+                this.cellH = cellH;
+                this.cols = cols;
+                this.first = first;
+                this.count = count;
+                this.ascent = ascent;
+            }
+
+            public destructor ~FontAtlas() returns void {
+                delete this.pixels;
+            }
+
+            // Normalized UV rect (u0, v0, u1, v1) of glyph `c`; out-of-range folds to the first cell.
+            public method uv(char c) returns float[] {
+                mutable int idx = cast<int>(c) - this.first;
+                if (idx < 0 || idx >= this.count) { idx = 0; }
+                int col = idx % this.cols;
+                int row = idx / this.cols;
+                float[] r = new float[4]();
+                r[0] = cast<float>(col * this.cellW) / cast<float>(this.atlasW);
+                r[1] = cast<float>(row * this.cellH) / cast<float>(this.atlasH);
+                r[2] = cast<float>((col + 1) * this.cellW) / cast<float>(this.atlasW);
+                r[3] = cast<float>((row + 1) * this.cellH) / cast<float>(this.atlasH);
+                return r;
+            }
+        }
+    }
+}

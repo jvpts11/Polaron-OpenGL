@@ -1,0 +1,22 @@
+program PolaronOpenGL;
+
+// The gdi32 entry points for offscreen text rasterization: a memory device context, a font, a DIB
+// section to draw into, and the metrics that say how big a cell has to be.
+public bundle OpenGL {
+    public namespace Text {
+
+        public class Gdi32 library Gdi {
+            public extern cdecl static method CreateCompatibleDC(long hdc) returns long;
+            public extern cdecl static method CreateFontIndirectW(long lplf) returns long;
+            public extern cdecl static method CreateDIBSection(long hdc, long pbmi, int usage, long ppvBits, long hSection, int offset) returns long;
+            public extern cdecl static method SelectObject(long hdc, long obj) returns long;
+            public extern cdecl static method SetTextColor(long hdc, int color) returns int;
+            public extern cdecl static method SetBkMode(long hdc, int mode) returns int;
+            public extern cdecl static method TextOutW(long hdc, int x, int y, long str, int count) returns int;
+            public extern cdecl static method GetTextMetricsW(long hdc, long tm) returns int;
+            public extern cdecl static method DeleteObject(long obj) returns int;
+            public extern cdecl static method DeleteDC(long hdc) returns int;
+            public extern cdecl static method GdiFlush() returns int;
+        }
+    }
+}

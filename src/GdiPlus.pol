@@ -1,0 +1,19 @@
+program PolaronOpenGL;
+
+// The GDI+ flat API. Windows already ships a JPEG/PNG/BMP decoder, so an image file is decoded by the
+// operating system rather than by a third-party image library bundled into every program.
+public bundle OpenGL {
+    public namespace Textures {
+
+        public class GdiPlus library GdiPlus {
+            public extern cdecl static method GdiplusStartup(long token, long input, long output) returns int;
+            public extern cdecl static method GdiplusShutdown(long token) returns void;
+            public extern cdecl static method GdipCreateBitmapFromFile(long fname, long bmp) returns int;
+            public extern cdecl static method GdipGetImageWidth(long img, long w) returns int;
+            public extern cdecl static method GdipGetImageHeight(long img, long h) returns int;
+            public extern cdecl static method GdipBitmapLockBits(long bmp, long rect, int flags, int fmt, long data) returns int;
+            public extern cdecl static method GdipBitmapUnlockBits(long bmp, long data) returns int;
+            public extern cdecl static method GdipDisposeImage(long img) returns int;
+        }
+    }
+}

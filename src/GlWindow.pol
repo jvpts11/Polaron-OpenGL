@@ -1,0 +1,279 @@
+import OpenGL.Core.Gdi;
+import OpenGL.Core.Wgl;
+import OpenGL.Core.Gl;
+import OpenGL.Core.PixelFormatDescriptor;
+import System.Memory.Allocator;
+import System.Memory.Raw;
+
+program PolaronOpenGL;
+
+// A real, native window with a modern GL context -- the GLFW-equivalent.
+//
+// open() registers a genuine top-level window class (WNDPROC = the OS DefWindowProcA, obtained through
+// GetProcAddress) and creates a WS_OVERLAPPEDWINDOW -- so it is movable, resizable and closable like any
+// application window -- then bootstraps a `major.minor` core context via wglCreateContextAttribsARB and
+// loads the modern entry points. Input is polled (GetAsyncKeyState / GetCursorPos); the scroll wheel and
+// the keyboard are read from the message queue during pump().
+//
+// OPEN ANSWERS true OR false, not 1 or 0. It used to return an int, and a consumer read it as a status
+// code -- `if (win.open(...) != 0) { fail }` -- which is the polarity a C API would have. The window
+// appeared (open shows it before returning), the check declared failure, the program took its software
+// fallback and exited: "the window opened and closed". A boolean cannot be read backwards by accident,
+// and every old call site that compares against 0 now fails to compile rather than fails at runtime.
+public bundle OpenGL {
+    public namespace Windowing {
+
+        public class GlWindow {
+            public mutable long hwnd; public mutable long hdc; public mutable long ctx;
+            public mutable Gl* gl;
+            private mutable address msg;      // reusable 48-byte MSG buffer
+            private mutable address pt;       // reusable 8-byte POINT buffer
+            private mutable Rect* rc;         // reusable client-rect (width/height are per-frame calls)
+            private mutable int scrollDelta;  // accumulated wheel delta since last read
+            private mutable address evbuf;    // ring of {kind,code,vk,repeat} (16 bytes each)
+            private mutable int evHead;
+            private mutable int evTail;
+            private mutable long curArrow;    // IDC_ARROW handle (chrome / default)
+            private mutable long curIBeam;    // IDC_IBEAM handle (over an editable text region)
+            private mutable long curHand;     // IDC_HAND handle (over a clickable)
+            private mutable long curResizeH;  // IDC_SIZEWE handle (over a horizontal resize divider)
+            private mutable long curResizeV;  // IDC_SIZENS handle (over a vertical resize divider)
+
+            private static final int EVENT_CAPACITY = 256;
+            private static final int EVENT_STRIDE = 16;
+            // WS_OVERLAPPEDWINDOW: title bar, borders, minimise/maximise/close. WS_VISIBLE (0x10000000)
+            // is added when the window is created but left out here -- AdjustWindowRect measures the
+            // frame, and whether the window is on screen is not part of how big its frame is.
+            private static final int WINDOW_STYLE = 0x00CF0000;
+
+            // Everything the window owns is acquired here and released in the destructor, so a window
+            // whose open() fails still tears down cleanly -- there is no half-built state to guard for.
+            public constructor GlWindow() {
+                this.hwnd = 0; this.hdc = 0; this.ctx = 0;
+                this.gl = new Gl() on heap;
+                this.rc = new Rect() on heap;
+                this.msg = Allocator.alloc(48);
+                this.pt = Allocator.alloc(8);
+                this.evbuf = Allocator.alloc(cast<long>(GlWindow.EVENT_CAPACITY * GlWindow.EVENT_STRIDE));
+                this.scrollDelta = 0;
+                this.evHead = 0;
+                this.evTail = 0;
+                this.curArrow = 0; this.curIBeam = 0; this.curHand = 0;
+                this.curResizeH = 0; this.curResizeV = 0;
+            }
+
+            public destructor ~GlWindow() returns void {
+                Allocator.free(this.evbuf);
+                Allocator.free(this.pt);
+                Allocator.free(this.msg);
+                delete this.rc;
+                delete this.gl;
+            }
+
+            // Open a native window and create a `major.minor` core context (e.g. 4, 6). True when the
+            // window and a modern driver are both there.
+            public method open(String title, int w, int h, int major, int minor) returns boolean {
+                // Match rendered pixels to cursor pixels: without this, a scaled display virtualizes
+                // GetCursorPos against a physical GetClientRect and clicks land off-target.
+                User.SetProcessDPIAware();
+                long hInst = Kernel.GetModuleHandleA(0);
+                long u32 = Kernel.LoadLibraryA("user32.dll");
+                long wndproc = Kernel.GetProcAddress(u32, "DefWindowProcA");
+                this.curArrow = User.LoadCursorA(0, 32512);   // IDC_ARROW
+                this.curIBeam = User.LoadCursorA(0, 32513);   // IDC_IBEAM (text cursor)
+                this.curHand = User.LoadCursorA(0, 32649);    // IDC_HAND (over a clickable)
+                this.curResizeH = User.LoadCursorA(0, 32644); // IDC_SIZEWE (horizontal resize divider)
+                this.curResizeV = User.LoadCursorA(0, 32645); // IDC_SIZENS (vertical resize divider)
+                // WNDCLASSEXA (80 bytes): register a real top-level class using the OS default WNDPROC.
+                String klass = "PolaronGlWindow";
+                address cls = Allocator.alloc(80);
+                mutable int k = 0;
+                while (k < 80) { Raw.write<byte>(cls + cast<address>(k), cast<byte>(0)); k = k + 1; }
+                address cname = Allocator.alloc(cast<long>(klass.length() + 1));
+                Raw.writeString(cname, klass);
+                Raw.write<byte>(cname + cast<address>(klass.length()), cast<byte>(0));
+                Raw.write<int>(cls, 80);                        // cbSize
+                Raw.write<int>(cls + cast<address>(4), 0x23);   // CS_HREDRAW|CS_VREDRAW|CS_OWNDC
+                Raw.write<long>(cls + cast<address>(8), wndproc);
+                Raw.write<long>(cls + cast<address>(24), hInst);
+                // hCursor = NULL on purpose: with no class cursor, DefWindowProc's WM_SETCURSOR does not
+                // reset the client-area cursor, so the per-frame setCursor() has full, flicker-free
+                // control of the shape -- I-beam only over text, arrow everywhere else. The window borders
+                // still get their resize cursors (those come from the non-client hit-test, not the class).
+                Raw.write<long>(cls + cast<address>(40), 0);
+                Raw.write<long>(cls + cast<address>(64), cast<long>(cname));
+                User.RegisterClassExA(cast<long>(cls));
+                Allocator.free(cls);
+                // `w` and `h` are the DRAWING AREA the caller asked for, so the window has to be bigger
+                // than that by whatever the title bar and borders take. Passing them straight to
+                // CreateWindowEx sizes the whole window instead, and the caller silently gets a smaller
+                // picture than it asked for -- a 640x480 request rendering into about 624x441, which
+                // shows up as a band of undrawn pixels the moment anyone reads the frame back.
+                this.rc.left = 0; this.rc.top = 0; this.rc.right = w; this.rc.bottom = h;
+                User.AdjustWindowRect(cast<address>(this.rc), GlWindow.WINDOW_STYLE, 0);
+                int outerW = this.rc.right - this.rc.left;
+                int outerH = this.rc.bottom - this.rc.top;
+                this.hwnd = User.CreateWindowExA(0, klass, title, GlWindow.WINDOW_STYLE + 0x10000000,
+                                                 120, 120, outerW, outerH, 0, 0, hInst, 0);
+                if (this.hwnd == 0) { return false; }
+                User.ShowWindow(this.hwnd, 5); User.UpdateWindow(this.hwnd);
+                this.hdc = User.GetDC(this.hwnd);
+                PixelFormatDescriptor* pfd = new PixelFormatDescriptor() on heap;
+                pfd.nSize = cast<short>(40); pfd.nVersion = cast<short>(1);
+                pfd.dwFlags = 0x25;   // PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL | PFD_DOUBLEBUFFER
+                pfd.iPixelType = cast<byte>(0); pfd.cColorBits = cast<byte>(32); pfd.cDepthBits = cast<byte>(24);
+                address pfdAt = cast<address>(pfd);
+                int fmt = Gdi.ChoosePixelFormat(this.hdc, pfdAt); Gdi.SetPixelFormat(this.hdc, fmt, pfdAt);
+                delete pfd;
+                long legacy = Wgl.wglCreateContext(this.hdc); Wgl.wglMakeCurrent(this.hdc, legacy);
+                long attribsFn = Wgl.wglGetProcAddress("wglCreateContextAttribsARB");
+                if (attribsFn == 0) { return false; }
+                address at = Allocator.alloc(28);
+                Raw.write<int>(at, 0x2091);                     Raw.write<int>(at + cast<address>(4), major);
+                Raw.write<int>(at + cast<address>(8), 0x2092);  Raw.write<int>(at + cast<address>(12), minor);
+                Raw.write<int>(at + cast<address>(16), 0x9126); Raw.write<int>(at + cast<address>(20), 1); // CORE
+                Raw.write<int>(at + cast<address>(24), 0);
+                funcptr<long, long, long, long> mk = cast<funcptr<long, long, long, long>>(attribsFn);
+                this.ctx = mk(this.hdc, 0, cast<long>(at)); Allocator.free(at);
+                if (this.ctx == 0) { return false; }
+                Wgl.wglMakeCurrent(this.hdc, this.ctx); Wgl.wglDeleteContext(legacy);
+                return this.gl.load();
+            }
+
+            // Push a decoded event onto the ring (dropped silently if the ring is full). The ring holds
+            // the kind as the raw 0/1 the message loop decoded; `kindOf` is the one place it becomes an
+            // EventKind, on the way out.
+            private method pushEvent(int rawKind, int code, int vk, int repeat) returns void {
+                int nextTail = (this.evTail + 1) % GlWindow.EVENT_CAPACITY;
+                if (nextTail == this.evHead) { return; }
+                address e = this.evbuf + cast<address>(this.evTail * GlWindow.EVENT_STRIDE);
+                Raw.write<int>(e, rawKind);
+                Raw.write<int>(e + cast<address>(4), code);
+                Raw.write<int>(e + cast<address>(8), vk);
+                Raw.write<int>(e + cast<address>(12), repeat);
+                this.evTail = nextTail;
+            }
+
+            private static method kindOf(int rawKind) returns EventKind {
+                if (rawKind == 0) { return EventKind.CHARACTER; }
+                return EventKind.KEY;
+            }
+
+            // Drain pending messages (keeps the window responsive: drag/resize/close via DefWindowProc),
+            // accumulate the mouse-wheel delta, and queue keyboard events. TranslateMessage turns a
+            // WM_KEYDOWN into a following WM_CHAR, so typed text arrives on the next loop turn.
+            public method pump() returns void {
+                while (User.PeekMessageA(this.msg, 0, 0, 0, 1) != 0) {
+                    int message = Raw.read<int>(this.msg + cast<address>(8));
+                    if (message == 0x020A) {          // WM_MOUSEWHEEL: high word of the low 32 bits of wParam
+                        int wp = Raw.read<int>(this.msg + cast<address>(16));
+                        int d = wp / 65536;           // arithmetic shift keeps the sign of the wheel delta
+                        this.scrollDelta = this.scrollDelta + d;
+                    } else if (message == 0x0102) {   // WM_CHAR: wParam is the UTF-16 code unit
+                        int cp = Raw.read<int>(this.msg + cast<address>(16)) & 65535;
+                        this.pushEvent(0, cp, 0, 0);
+                    } else if (message == 0x0100) {   // WM_KEYDOWN: wParam is the virtual-key
+                        int vk = Raw.read<int>(this.msg + cast<address>(16)) & 65535;
+                        int lp = Raw.read<int>(this.msg + cast<address>(24));
+                        mutable int rep = 0;
+                        if ((lp & 0x40000000) != 0) { rep = 1; }   // lParam bit 30 = auto-repeat
+                        this.pushEvent(1, 0, vk, rep);
+                    }
+                    User.TranslateMessage(this.msg);
+                    User.DispatchMessageA(this.msg);
+                }
+            }
+
+            // Keyboard event queue drained by the app: hasEvent() then nextEvent() each frame.
+            public method hasEvent() returns boolean { return this.evHead != this.evTail; }
+            public method nextEvent() returns InputEvent* {
+                if (this.evHead == this.evTail) {
+                    return new InputEvent(EventKind.NONE, 0, 0, false) on heap;
+                }
+                address e = this.evbuf + cast<address>(this.evHead * GlWindow.EVENT_STRIDE);
+                int rawKind = Raw.read<int>(e);
+                int code = Raw.read<int>(e + cast<address>(4));
+                int vk = Raw.read<int>(e + cast<address>(8));
+                int rep = Raw.read<int>(e + cast<address>(12));
+                this.evHead = (this.evHead + 1) % GlWindow.EVENT_CAPACITY;
+                return new InputEvent(GlWindow.kindOf(rawKind), code, vk, rep != 0) on heap;
+            }
+
+            // Live modifier state (the high bit of GetAsyncKeyState = key currently down).
+            public method modShift() returns boolean { return (User.GetAsyncKeyState(0x10) & 0x8000) != 0; }
+            public method modCtrl()  returns boolean { return (User.GetAsyncKeyState(0x11) & 0x8000) != 0; }
+            public method modAlt()   returns boolean { return (User.GetAsyncKeyState(0x12) & 0x8000) != 0; }
+            public method swap() returns void { Gdi.SwapBuffers(this.hdc); }
+            public method sleep(int ms) returns void { Kernel.Sleep(ms); }
+            // Vertical sync: 1 caps the frame rate to the monitor's refresh (smooth, no tearing), 0 lets
+            // it run unbounded. Uses the WGL_EXT_swap_control extension, loaded on demand.
+            public method setVSync(int interval) returns void {
+                long fn = Wgl.wglGetProcAddress("wglSwapIntervalEXT");
+                if (fn != 0) { funcptr<int, int> si = cast<funcptr<int, int>>(fn); si(interval); }
+            }
+            public method isOpen() returns boolean { return User.IsWindow(this.hwnd) != 0; }
+            // Only the high bit means "currently down"; the low bit ("pressed since last call") is unreliable
+            // and, for the mouse button, made edge-detected clicks fire on the wrong frame.
+            //
+            // AND ONLY WHEN THIS WINDOW HAS THE KEYBOARD.
+            //
+            // `GetAsyncKeyState` reads the physical keyboard, not this window's -- which is exactly
+            // what the note further down already says about the MOUSE, where somebody found it and
+            // gated clicks on `isForeground`. The keyboard never got the same treatment, and the
+            // cost is not subtle: six copies of a game open at once, one ESC pressed in one of them,
+            // and ALL SIX QUIT. It also means typing in any other application drives every window
+            // this library has ever opened.
+            //
+            // Gated here rather than at each call site, because "a key is down" is only ever true of
+            // a window that has the keyboard, and leaving fifty callers to remember it is how it
+            // came to be true of none of them.
+            public method keyDown(int vk) returns boolean {
+                if (!this.isForeground()) {
+                    return false;
+                }
+                return (User.GetAsyncKeyState(vk) & 0x8000) != 0;
+            }
+            public method width() returns int {
+                User.GetClientRect(this.hwnd, cast<address>(this.rc));
+                return this.rc.right - this.rc.left;
+            }
+            public method height() returns int {
+                User.GetClientRect(this.hwnd, cast<address>(this.rc));
+                return this.rc.bottom - this.rc.top;
+            }
+            // Cursor X/Y in client coordinates.
+            public method cursorX() returns int {
+                User.GetCursorPos(this.pt); User.ScreenToClient(this.hwnd, this.pt);
+                return Raw.read<int>(this.pt);
+            }
+            public method cursorY() returns int {
+                User.GetCursorPos(this.pt); User.ScreenToClient(this.hwnd, this.pt);
+                return Raw.read<int>(this.pt + cast<address>(4));
+            }
+            // Wheel delta accumulated since the previous call (units of 120 per notch), then reset.
+            public method takeScroll() returns int { int d = this.scrollDelta; this.scrollDelta = 0; return d; }
+            public method setTitle(String t) returns void { User.SetWindowTextA(this.hwnd, t); }
+            // Set the client-area cursor. Call it every frame with the region under the cursor --
+            // SetCursor persists until the next WM_SETCURSOR, and the per-frame call keeps the right
+            // shape without flicker.
+            public method setCursor(CursorKind kind) returns void {
+                if (kind == CursorKind.IBEAM) {
+                    User.SetCursor(this.curIBeam);
+                } else if (kind == CursorKind.HAND) {
+                    User.SetCursor(this.curHand);
+                } else if (kind == CursorKind.RESIZE_H) {
+                    User.SetCursor(this.curResizeH);
+                } else if (kind == CursorKind.RESIZE_V) {
+                    User.SetCursor(this.curResizeV);
+                } else {
+                    User.SetCursor(this.curArrow);
+                }
+            }
+            // Is this window the foreground (focused) window? GetAsyncKeyState reads mouse buttons globally,
+            // so click handling must gate on this to ignore clicks aimed at other apps.
+            public method isForeground() returns boolean {
+                return User.GetForegroundWindow() == this.hwnd;
+            }
+        }
+    }
+}

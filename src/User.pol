@@ -1,0 +1,39 @@
+program PolaronOpenGL;
+
+// The user32 surface: window creation and lifetime, the message queue, and polled input.
+public bundle OpenGL {
+    public namespace Windowing {
+
+        public class User library User32 {
+            public extern cdecl static method RegisterClassExA(long wc) returns int;
+            public extern cdecl static method CreateWindowExA(int ex, string cls, string name, int st,
+                int x, int y, int w, int h, long parent, long menu, long inst, long param) returns long;
+            public extern cdecl static method LoadCursorA(long inst, int id) returns long;
+            public extern cdecl static method SetCursor(long h) returns long;
+            public extern cdecl static method SetProcessDPIAware() returns int;
+            public extern cdecl static method ShowWindow(long h, int cmd) returns int;
+            public extern cdecl static method UpdateWindow(long h) returns int;
+            public extern cdecl static method GetDC(long h) returns long;
+            public extern cdecl static method IsWindow(long h) returns int;
+            // The buffer parameters are ADDRESSES, not longs. Win32 takes an LPMSG and an LPPOINT --
+            // memory this side allocates and the call writes into -- and declaring them `long` said
+            // "a number" about a pointer. It compiled because `address` used to widen to `long` like
+            // any other integer; it does not any more, and this is the kind of thing that rule is
+            // for. The handle parameters below stay `long`: an HWND is opaque and every caller here
+            // holds it as one.
+            public extern cdecl static method PeekMessageA(address m, long h, int a, int b, int r) returns int;
+            public extern cdecl static method TranslateMessage(address m) returns int;
+            public extern cdecl static method DispatchMessageA(address m) returns long;
+            public extern cdecl static method GetAsyncKeyState(int vk) returns int;
+            public extern cdecl static method GetCursorPos(address pt) returns int;
+            public extern cdecl static method ScreenToClient(long h, address pt) returns int;
+            public extern cdecl static method GetClientRect(long h, address r) returns int;
+            // Grow a rectangle from the drawing area a caller wants to the window size that contains it.
+            // Without it, a window asked for 640x480 draws into about 624x441 -- the title bar and the
+            // borders come out of the caller's picture.
+            public extern cdecl static method AdjustWindowRect(address r, int style, int menu) returns int;
+            public extern cdecl static method SetWindowTextA(long h, string t) returns int;
+            public extern cdecl static method GetForegroundWindow() returns long;
+        }
+    }
+}

@@ -1,0 +1,124 @@
+import System.Math.Numerics;
+import System.Memory.Allocator;
+import System.Memory.Raw;
+
+program PolaronOpenGL;
+
+// A 4x4 matrix for the pipeline -- the GLM-equivalent.
+//
+// GlMat4 wraps a 16-float, column-major buffer laid out exactly as OpenGL expects, so ptr() can be handed
+// straight to glUniformMatrix4fv. Transforms are right-multiplied (m = m * T), matching glm::translate /
+// rotate / scale. The buffer is owned but *not* freed by a destructor -- GlMat4 has value semantics, and
+// a copy carries the same address, so a destructor would free memory the copy still points at; the owner
+// calls dispose() explicitly. Transform builders multiply through a raw scratch buffer, never a temporary
+// GlMat4, so no GlMat4 is ever copied.
+public bundle OpenGL {
+    public namespace Geometry {
+
+        public class GlMat4 {
+            public mutable address buf;
+
+            public constructor GlMat4() { this.buf = Allocator.alloc(64); this.identity(); }
+            public method dispose() returns void { Allocator.free(this.buf); }
+
+            public method ptr() returns long { return cast<long>(this.buf); }
+            public method set(int i, float v) returns void { Raw.write<float>(this.buf + cast<address>(i * 4), v); }
+            public method get(int i) returns float { return Raw.read<float>(this.buf + cast<address>(i * 4)); }
+
+            public method zero() returns void {
+                mutable int i = 0; while (i < 16) { this.set(i, 0.0); i = i + 1; }
+            }
+            public method identity() returns void {
+                this.zero(); this.set(0, 1.0); this.set(5, 1.0); this.set(10, 1.0); this.set(15, 1.0);
+            }
+
+            // this = this * r, where r is a raw 16-float column-major buffer.
+            private method mulRaw(address r) returns void {
+                address tmp = Allocator.alloc(64);
+                mutable int c = 0;
+                while (c < 4) {
+                    mutable int rw = 0;
+                    while (rw < 4) {
+                        mutable float s = 0.0; mutable int k = 0;
+                        while (k < 4) {
+                            s = s + this.get(k * 4 + rw) * Raw.read<float>(r + cast<address>((c * 4 + k) * 4));
+                            k = k + 1;
+                        }
+                        Raw.write<float>(tmp + cast<address>((c * 4 + rw) * 4), s);
+                        rw = rw + 1;
+                    }
+                    c = c + 1;
+                }
+                mutable int i = 0;
+                while (i < 16) { this.set(i, Raw.read<float>(tmp + cast<address>(i * 4))); i = i + 1; }
+                Allocator.free(tmp);
+            }
+
+            // Fill a scratch buffer with identity, then let the caller poke its non-identity entries.
+            private static method scratchIdentity(address t) returns void {
+                mutable int i = 0; while (i < 16) { Raw.write<float>(t + cast<address>(i * 4), 0.0); i = i + 1; }
+                Raw.write<float>(t, 1.0); Raw.write<float>(t + cast<address>(20), 1.0);
+                Raw.write<float>(t + cast<address>(40), 1.0); Raw.write<float>(t + cast<address>(60), 1.0);
+            }
+
+            public method translate(float x, float y, float z) returns void {
+                address t = Allocator.alloc(64); GlMat4.scratchIdentity(t);
+                Raw.write<float>(t + cast<address>(48), x); Raw.write<float>(t + cast<address>(52), y);
+                Raw.write<float>(t + cast<address>(56), z);
+                this.mulRaw(t); Allocator.free(t);
+            }
+            public method scale(float x, float y, float z) returns void {
+                address t = Allocator.alloc(64); GlMat4.scratchIdentity(t);
+                Raw.write<float>(t, x); Raw.write<float>(t + cast<address>(20), y); Raw.write<float>(t + cast<address>(40), z);
+                this.mulRaw(t); Allocator.free(t);
+            }
+            public method scaleUniform(float s) returns void { this.scale(s, s, s); }
+
+            // Rotate by `deg` around the (ax,ay,az) axis (Rodrigues; axis normalized here).
+            public method rotate(float deg, float ax, float ay, float az) returns void {
+                double rad = cast<double>(deg) * 3.14159265358979 / 180.0;
+                float c = cast<float>(Numerics.cos(rad)); float s = cast<float>(Numerics.sin(rad));
+                float len = cast<float>(Numerics.sqrt(cast<double>(ax * ax + ay * ay + az * az)));
+                if (len < 0.000001) { return; }
+                float x = ax / len; float y = ay / len; float z = az / len; float t1 = 1.0 - c;
+                address t = Allocator.alloc(64); GlMat4.scratchIdentity(t);
+                Raw.write<float>(t + cast<address>(0), t1*x*x + c);    Raw.write<float>(t + cast<address>(4), t1*x*y + s*z);  Raw.write<float>(t + cast<address>(8), t1*x*z - s*y);
+                Raw.write<float>(t + cast<address>(16), t1*x*y - s*z); Raw.write<float>(t + cast<address>(20), t1*y*y + c);  Raw.write<float>(t + cast<address>(24), t1*y*z + s*x);
+                Raw.write<float>(t + cast<address>(32), t1*x*z + s*y); Raw.write<float>(t + cast<address>(36), t1*y*z - s*x); Raw.write<float>(t + cast<address>(40), t1*z*z + c);
+                this.mulRaw(t); Allocator.free(t);
+            }
+
+            public method perspective(float fovyDeg, float aspect, float near, float far) returns void {
+                this.zero();
+                double fr = cast<double>(fovyDeg) * 3.14159265358979 / 360.0;
+                float f = cast<float>(Numerics.cos(fr) / Numerics.sin(fr));   // cot(fr) = 1/tan(fr)
+                this.set(0, f / aspect); this.set(5, f);
+                this.set(10, (far + near) / (near - far)); this.set(11, 0.0 - 1.0);
+                this.set(14, (2.0 * far * near) / (near - far));
+            }
+            public method ortho(float l, float r, float b, float t, float n, float f) returns void {
+                this.zero();
+                this.set(0, 2.0 / (r - l)); this.set(5, 2.0 / (t - b)); this.set(10, 0.0 - 2.0 / (f - n));
+                this.set(12, 0.0 - (r + l) / (r - l)); this.set(13, 0.0 - (t + b) / (t - b));
+                this.set(14, 0.0 - (f + n) / (f - n)); this.set(15, 1.0);
+            }
+            public method lookAt(float ex, float ey, float ez, float cx, float cy, float cz,
+                                 float ux, float uy, float uz) returns void {
+                mutable float fx = cx - ex; mutable float fy = cy - ey; mutable float fz = cz - ez;
+                float fl = cast<float>(Numerics.sqrt(cast<double>(fx*fx + fy*fy + fz*fz)));
+                fx = fx / fl; fy = fy / fl; fz = fz / fl;
+                mutable float sx = fy*uz - fz*uy; mutable float sy = fz*ux - fx*uz; mutable float sz = fx*uy - fy*ux;
+                float sl = cast<float>(Numerics.sqrt(cast<double>(sx*sx + sy*sy + sz*sz)));
+                sx = sx / sl; sy = sy / sl; sz = sz / sl;
+                float vx = sy*fz - sz*fy; float vy = sz*fx - sx*fz; float vz = sx*fy - sy*fx;
+                this.identity();
+                this.set(0, sx); this.set(4, sy); this.set(8, sz);
+                this.set(1, vx); this.set(5, vy); this.set(9, vz);
+                this.set(2, 0.0 - fx); this.set(6, 0.0 - fy); this.set(10, 0.0 - fz);
+                this.set(12, 0.0 - (sx*ex + sy*ey + sz*ez));
+                this.set(13, 0.0 - (vx*ex + vy*ey + vz*ez));
+                this.set(14, fx*ex + fy*ey + fz*ez);
+            }
+        }
+    }
+}

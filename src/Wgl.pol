@@ -1,0 +1,43 @@
+program PolaronOpenGL;
+
+// OpenGL 1.1 core (directly exported by opengl32) plus WGL context management. These are the calls that
+// never needed loading; every modern entry point lives on `Gl`, resolved at runtime.
+public bundle OpenGL {
+    public namespace Core {
+
+        public class Wgl library OpenGL {
+            public extern cdecl static method wglCreateContext(long hdc) returns long;
+            public extern cdecl static method wglMakeCurrent(long hdc, long ctx) returns int;
+            public extern cdecl static method wglDeleteContext(long ctx) returns int;
+            public extern cdecl static method wglGetProcAddress(string name) returns long;
+            public extern cdecl static method glGetString(int name) returns long;
+            public extern cdecl static method glGetError() returns int;
+            public extern cdecl static method glGetIntegerv(int pname, long data) returns void;
+            public extern cdecl static method glEnable(int cap) returns void;
+            public extern cdecl static method glDisable(int cap) returns void;
+            public extern cdecl static method glClear(int mask) returns void;
+            public extern cdecl static method glClearColor(float r, float g, float b, float a) returns void;
+            public extern cdecl static method glClearDepth(double d) returns void;
+            public extern cdecl static method glViewport(int x, int y, int w, int h) returns void;
+            public extern cdecl static method glScissor(int x, int y, int w, int h) returns void;
+            public extern cdecl static method glDepthFunc(int f) returns void;
+            public extern cdecl static method glDepthMask(byte flag) returns void;
+            public extern cdecl static method glBlendFunc(int s, int d) returns void;
+            public extern cdecl static method glCullFace(int mode) returns void;
+            public extern cdecl static method glFrontFace(int mode) returns void;
+            public extern cdecl static method glPolygonMode(int face, int mode) returns void;
+            public extern cdecl static method glLineWidth(float w) returns void;
+            public extern cdecl static method glDrawArrays(int mode, int first, int count) returns void;
+            public extern cdecl static method glDrawElements(int mode, int count, int typ, long idx) returns void;
+            public extern cdecl static method glReadPixels(int x, int y, int w, int h, int fmt, int typ, long data) returns void;
+            public extern cdecl static method glPixelStorei(int pname, int param) returns void;
+            public extern cdecl static method glGenTextures(int n, long ids) returns void;
+            public extern cdecl static method glBindTexture(int target, int tex) returns void;
+            public extern cdecl static method glTexImage2D(int t, int lvl, int ifmt, int w, int h, int b, int fmt, int typ, long px) returns void;
+            public extern cdecl static method glTexParameteri(int t, int pname, int param) returns void;
+            public extern cdecl static method glDeleteTextures(int n, long ids) returns void;
+            public extern cdecl static method glFinish() returns void;
+            public extern cdecl static method glFlush() returns void;
+        }
+    }
+}

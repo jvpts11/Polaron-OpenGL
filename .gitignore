@@ -1,0 +1,3 @@
+# The bundle is built from source by whoever plugs this library.
+build-output/
+packages/

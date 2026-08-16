@@ -1,0 +1,23 @@
+[polaron_project]
+
+[library]
+name = "Polaron-OpenGL"
+version = "1.0.0"
+language_version = "1.0"
+entry = "src/Gl.pol"
+
+# The foreign libraries this code declares with `class X library Y`, mapped to the file each platform
+# spells them in. The logical name is ours and lives in the source; the file name is the platform's and
+# lives here -- which is why a consumer no longer has to know that this library needs opengl32 and four
+# others, and no longer has to copy that list into its own manifest.
+[libraries]
+OpenGL   = { windows = "opengl32" }
+Gdi      = { windows = "gdi32" }
+User32   = { windows = "user32" }
+Kernel32 = { windows = "kernel32" }
+GdiPlus  = { windows = "gdiplus" }
+
+[build]
+output = "build-output/"
+target = "x86_64-windows"
+freestanding = false

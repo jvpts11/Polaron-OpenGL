@@ -1,0 +1,99 @@
+import System.Compress.Crc32;
+import System.Compress.Zlib;
+import System.Compress.ByteSink;
+
+program TriangleDemo;
+
+// A PNG encoder for a frame read back off the GPU. It exists so the demo can be checked by looking at
+// it, and checked without looking at it: a program that only says "it rendered" has not said anything.
+//
+// PNG is a smaller thing than its reputation: a signature, three chunks, and a CRC on each. The
+// compression is the standard library's -- `Zlib.compress` is exactly what an IDAT payload is -- so what
+// is left here is the framing.
+public bundle TriangleDemo {
+    public namespace Demo {
+
+        public class FramePng {
+            // `rgb` is what glReadPixels hands back: tight RGB triples, BOTTOM ROW FIRST. PNG counts
+            // rows from the top, so the rows come out in the opposite order to the way they went in.
+            public static method encode(byte[] rgb, int width, int height) returns int[] {
+                mutable ByteSink* raw = new ByteSink() on heap;
+                for (mutable int y = 0; y < height; y++) {
+                    int source = height - 1 - y;
+                    raw.add(0);                      // filter byte 0: no prediction on this row
+                    for (mutable int x = 0; x < width; x++) {
+                        int at = (source * width + x) * 3;
+                        raw.add(cast<int>(rgb[at]) & 255);
+                        raw.add(cast<int>(rgb[at + 1]) & 255);
+                        raw.add(cast<int>(rgb[at + 2]) & 255);
+                    }
+                }
+                mutable int[] rows = raw.toBytes();
+                delete raw;
+                mutable int[] idat = Zlib.compress(rows, rows.length());
+                delete rows;
+
+                mutable ByteSink* out = new ByteSink() on heap;
+                out.add(137); out.add(80); out.add(78); out.add(71);
+                out.add(13); out.add(10); out.add(26); out.add(10);
+
+                mutable ByteSink* ihdr = new ByteSink() on heap;
+                FramePng.putInt(ihdr, width);
+                FramePng.putInt(ihdr, height);
+                ihdr.add(8);    // 8 bits per channel
+                ihdr.add(2);    // colour type 2: truecolour, no alpha
+                ihdr.add(0);    // deflate
+                ihdr.add(0);    // adaptive filtering
+                ihdr.add(0);    // no interlace
+                FramePng.chunk(out, "IHDR", ihdr);
+                delete ihdr;
+
+                mutable ByteSink* body = new ByteSink() on heap;
+                for (mutable int i = 0; i < idat.length(); i++) { body.add(idat[i]); }
+                delete idat;
+                FramePng.chunk(out, "IDAT", body);
+                delete body;
+
+                mutable ByteSink* end = new ByteSink() on heap;
+                FramePng.chunk(out, "IEND", end);
+                delete end;
+
+                int[] result = out.toBytes();
+                delete out;
+                return result;
+            }
+
+            private static method putInt(ByteSink* out, int v) returns void {
+                out.add((v >> 24) & 255);
+                out.add((v >> 16) & 255);
+                out.add((v >> 8) & 255);
+                out.add(v & 255);
+            }
+
+            // length, type, data, CRC of (type + data) -- the CRC covers the type, which is the part
+            // every hand-rolled encoder gets wrong once.
+            private static method chunk(ByteSink* out, String type, ByteSink* data) returns void {
+                mutable int[] payload = data.toBytes();
+                FramePng.putInt(out, payload.length());
+
+                mutable ByteSink* covered = new ByteSink() on heap;
+                for (mutable int i = 0; i < type.length(); i++) {
+                    covered.add(cast<int>(type.charAt(i)) & 255);
+                }
+                for (mutable int i = 0; i < payload.length(); i++) { covered.add(payload[i]); }
+                mutable int[] crcInput = covered.toBytes();
+                delete covered;
+
+                for (mutable int i = 0; i < crcInput.length(); i++) { out.add(crcInput[i]); }
+                long crc = Crc32.ofBytes(crcInput, crcInput.length());
+                delete crcInput;
+                delete payload;
+
+                out.add(cast<int>((crc >> 24) & cast<long>(255)));
+                out.add(cast<int>((crc >> 16) & cast<long>(255)));
+                out.add(cast<int>((crc >> 8) & cast<long>(255)));
+                out.add(cast<int>(crc & cast<long>(255)));
+            }
+        }
+    }
+}

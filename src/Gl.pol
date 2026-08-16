@@ -1,0 +1,194 @@
+import System.Memory.Allocator;
+import System.Memory.Raw;
+
+program PolaronOpenGL;
+
+// The OpenGL core for the modern (4.6) pipeline -- the GLEW-equivalent loader.
+//
+// opengl32 only exports OpenGL 1.1 directly (that lives on `Wgl`, alongside WGL context management);
+// every modern entry point is loaded at runtime through wglGetProcAddress into a `funcptr<>` field here.
+// Call `gl.load()` once a core context is current, then use the fields directly, e.g.
+// `gl.genVertexArrays(1, ptr)`. GLenum/GLuint/GLint/GLsizei map to `int`, GLfloat to `float`, GLboolean
+// to `byte`, and pointers / GLsizeiptr / GLintptr / offsets to `long`.
+//
+// This file is the library's entry in polaron.toml: it names the directory the build sweeps, which is
+// how the other twenty types get compiled with it.
+public bundle OpenGL {
+    public namespace Core {
+
+        public class Gl {
+            // --- shaders & programs ---
+            public mutable funcptr<int, int> createShader;
+            public mutable funcptr<void, int, int, long, long> shaderSource;
+            public mutable funcptr<void, int> compileShader;
+            public mutable funcptr<void, int, int, long> getShaderiv;
+            public mutable funcptr<void, int, int, long, long> getShaderInfoLog;
+            public mutable funcptr<void, int> deleteShader;
+            public mutable funcptr<int> createProgram;
+            public mutable funcptr<void, int, int> attachShader;
+            public mutable funcptr<void, int, int> detachShader;
+            public mutable funcptr<void, int> linkProgram;
+            public mutable funcptr<void, int, int, long> getProgramiv;
+            public mutable funcptr<void, int, int, long, long> getProgramInfoLog;
+            public mutable funcptr<void, int> useProgram;
+            public mutable funcptr<void, int> deleteProgram;
+            // --- uniforms ---
+            public mutable funcptr<int, int, string> getUniformLocation;
+            public mutable funcptr<void, int, int> uniform1i;
+            public mutable funcptr<void, int, float> uniform1f;
+            public mutable funcptr<void, int, float, float> uniform2f;
+            public mutable funcptr<void, int, float, float, float> uniform3f;
+            public mutable funcptr<void, int, float, float, float, float> uniform4f;
+            public mutable funcptr<void, int, int, long> uniform3fv;
+            public mutable funcptr<void, int, int, byte, long> uniformMatrix3fv;
+            public mutable funcptr<void, int, int, byte, long> uniformMatrix4fv;
+            public mutable funcptr<int, int, string> getUniformBlockIndex;
+            public mutable funcptr<void, int, int, int> uniformBlockBinding;
+            // --- buffers & vertex arrays ---
+            public mutable funcptr<void, int, long> genBuffers;
+            public mutable funcptr<void, int, int> bindBuffer;
+            public mutable funcptr<void, int, long, long, int> bufferData;
+            public mutable funcptr<void, int, long, long, long> bufferSubData;
+            public mutable funcptr<void, int, long> deleteBuffers;
+            public mutable funcptr<void, int, int, long> bindBufferBase;
+            public mutable funcptr<void, int, long> genVertexArrays;
+            public mutable funcptr<void, int> bindVertexArray;
+            public mutable funcptr<void, int, long> deleteVertexArrays;
+            public mutable funcptr<void, int, int, int, byte, int, long> vertexAttribPointer;
+            public mutable funcptr<void, int> enableVertexAttribArray;
+            public mutable funcptr<void, int> disableVertexAttribArray;
+            public mutable funcptr<void, int, int> vertexAttribDivisor;
+            // --- textures (modern) ---
+            public mutable funcptr<void, int> activeTexture;
+            public mutable funcptr<void, int> generateMipmap;
+            public mutable funcptr<void, int, int, int, int, int, int, int, int, long> texSubImage2D;
+            // --- framebuffers & renderbuffers ---
+            public mutable funcptr<void, int, long> genFramebuffers;
+            public mutable funcptr<void, int, int> bindFramebuffer;
+            public mutable funcptr<void, int, int, int, int, int> framebufferTexture2D;
+            public mutable funcptr<int, int> checkFramebufferStatus;
+            public mutable funcptr<void, int, long> deleteFramebuffers;
+            public mutable funcptr<void, int, long> genRenderbuffers;
+            public mutable funcptr<void, int, int> bindRenderbuffer;
+            public mutable funcptr<void, int, int, int, int> renderbufferStorage;
+            public mutable funcptr<void, int, int, int, int> framebufferRenderbuffer;
+            public mutable funcptr<void, int, long> deleteRenderbuffers;
+            // --- draw (modern / instanced) ---
+            public mutable funcptr<void, int, int, int, int> drawArraysInstanced;
+            public mutable funcptr<void, int, int, int, long, int> drawElementsInstanced;
+
+            // Resolve every entry point. True if the essentials loaded; false when there is no modern
+            // driver behind the context.
+            public method load() returns boolean {
+                this.createShader = cast<funcptr<int, int>>(Wgl.wglGetProcAddress("glCreateShader"));
+                this.shaderSource = cast<funcptr<void, int, int, long, long>>(Wgl.wglGetProcAddress("glShaderSource"));
+                this.compileShader = cast<funcptr<void, int>>(Wgl.wglGetProcAddress("glCompileShader"));
+                this.getShaderiv = cast<funcptr<void, int, int, long>>(Wgl.wglGetProcAddress("glGetShaderiv"));
+                this.getShaderInfoLog = cast<funcptr<void, int, int, long, long>>(Wgl.wglGetProcAddress("glGetShaderInfoLog"));
+                this.deleteShader = cast<funcptr<void, int>>(Wgl.wglGetProcAddress("glDeleteShader"));
+                this.createProgram = cast<funcptr<int>>(Wgl.wglGetProcAddress("glCreateProgram"));
+                this.attachShader = cast<funcptr<void, int, int>>(Wgl.wglGetProcAddress("glAttachShader"));
+                this.detachShader = cast<funcptr<void, int, int>>(Wgl.wglGetProcAddress("glDetachShader"));
+                this.linkProgram = cast<funcptr<void, int>>(Wgl.wglGetProcAddress("glLinkProgram"));
+                this.getProgramiv = cast<funcptr<void, int, int, long>>(Wgl.wglGetProcAddress("glGetProgramiv"));
+                this.getProgramInfoLog = cast<funcptr<void, int, int, long, long>>(Wgl.wglGetProcAddress("glGetProgramInfoLog"));
+                this.useProgram = cast<funcptr<void, int>>(Wgl.wglGetProcAddress("glUseProgram"));
+                this.deleteProgram = cast<funcptr<void, int>>(Wgl.wglGetProcAddress("glDeleteProgram"));
+                this.getUniformLocation = cast<funcptr<int, int, string>>(Wgl.wglGetProcAddress("glGetUniformLocation"));
+                this.uniform1i = cast<funcptr<void, int, int>>(Wgl.wglGetProcAddress("glUniform1i"));
+                this.uniform1f = cast<funcptr<void, int, float>>(Wgl.wglGetProcAddress("glUniform1f"));
+                this.uniform2f = cast<funcptr<void, int, float, float>>(Wgl.wglGetProcAddress("glUniform2f"));
+                this.uniform3f = cast<funcptr<void, int, float, float, float>>(Wgl.wglGetProcAddress("glUniform3f"));
+                this.uniform4f = cast<funcptr<void, int, float, float, float, float>>(Wgl.wglGetProcAddress("glUniform4f"));
+                this.uniform3fv = cast<funcptr<void, int, int, long>>(Wgl.wglGetProcAddress("glUniform3fv"));
+                this.uniformMatrix3fv = cast<funcptr<void, int, int, byte, long>>(Wgl.wglGetProcAddress("glUniformMatrix3fv"));
+                this.uniformMatrix4fv = cast<funcptr<void, int, int, byte, long>>(Wgl.wglGetProcAddress("glUniformMatrix4fv"));
+                this.getUniformBlockIndex = cast<funcptr<int, int, string>>(Wgl.wglGetProcAddress("glGetUniformBlockIndex"));
+                this.uniformBlockBinding = cast<funcptr<void, int, int, int>>(Wgl.wglGetProcAddress("glUniformBlockBinding"));
+                this.genBuffers = cast<funcptr<void, int, long>>(Wgl.wglGetProcAddress("glGenBuffers"));
+                this.bindBuffer = cast<funcptr<void, int, int>>(Wgl.wglGetProcAddress("glBindBuffer"));
+                this.bufferData = cast<funcptr<void, int, long, long, int>>(Wgl.wglGetProcAddress("glBufferData"));
+                this.bufferSubData = cast<funcptr<void, int, long, long, long>>(Wgl.wglGetProcAddress("glBufferSubData"));
+                this.deleteBuffers = cast<funcptr<void, int, long>>(Wgl.wglGetProcAddress("glDeleteBuffers"));
+                this.bindBufferBase = cast<funcptr<void, int, int, long>>(Wgl.wglGetProcAddress("glBindBufferBase"));
+                this.genVertexArrays = cast<funcptr<void, int, long>>(Wgl.wglGetProcAddress("glGenVertexArrays"));
+                this.bindVertexArray = cast<funcptr<void, int>>(Wgl.wglGetProcAddress("glBindVertexArray"));
+                this.deleteVertexArrays = cast<funcptr<void, int, long>>(Wgl.wglGetProcAddress("glDeleteVertexArrays"));
+                this.vertexAttribPointer = cast<funcptr<void, int, int, int, byte, int, long>>(Wgl.wglGetProcAddress("glVertexAttribPointer"));
+                this.enableVertexAttribArray = cast<funcptr<void, int>>(Wgl.wglGetProcAddress("glEnableVertexAttribArray"));
+                this.disableVertexAttribArray = cast<funcptr<void, int>>(Wgl.wglGetProcAddress("glDisableVertexAttribArray"));
+                this.vertexAttribDivisor = cast<funcptr<void, int, int>>(Wgl.wglGetProcAddress("glVertexAttribDivisor"));
+                this.activeTexture = cast<funcptr<void, int>>(Wgl.wglGetProcAddress("glActiveTexture"));
+                this.generateMipmap = cast<funcptr<void, int>>(Wgl.wglGetProcAddress("glGenerateMipmap"));
+                this.texSubImage2D = cast<funcptr<void, int, int, int, int, int, int, int, int, long>>(Wgl.wglGetProcAddress("glTexSubImage2D"));
+                this.genFramebuffers = cast<funcptr<void, int, long>>(Wgl.wglGetProcAddress("glGenFramebuffers"));
+                this.bindFramebuffer = cast<funcptr<void, int, int>>(Wgl.wglGetProcAddress("glBindFramebuffer"));
+                this.framebufferTexture2D = cast<funcptr<void, int, int, int, int, int>>(Wgl.wglGetProcAddress("glFramebufferTexture2D"));
+                this.checkFramebufferStatus = cast<funcptr<int, int>>(Wgl.wglGetProcAddress("glCheckFramebufferStatus"));
+                this.deleteFramebuffers = cast<funcptr<void, int, long>>(Wgl.wglGetProcAddress("glDeleteFramebuffers"));
+                this.genRenderbuffers = cast<funcptr<void, int, long>>(Wgl.wglGetProcAddress("glGenRenderbuffers"));
+                this.bindRenderbuffer = cast<funcptr<void, int, int>>(Wgl.wglGetProcAddress("glBindRenderbuffer"));
+                this.renderbufferStorage = cast<funcptr<void, int, int, int, int>>(Wgl.wglGetProcAddress("glRenderbufferStorage"));
+                this.framebufferRenderbuffer = cast<funcptr<void, int, int, int, int>>(Wgl.wglGetProcAddress("glFramebufferRenderbuffer"));
+                this.deleteRenderbuffers = cast<funcptr<void, int, long>>(Wgl.wglGetProcAddress("glDeleteRenderbuffers"));
+                this.drawArraysInstanced = cast<funcptr<void, int, int, int, int>>(Wgl.wglGetProcAddress("glDrawArraysInstanced"));
+                this.drawElementsInstanced = cast<funcptr<void, int, int, int, long, int>>(Wgl.wglGetProcAddress("glDrawElementsInstanced"));
+                if (cast<long>(this.createShader) == 0) { return false; }
+                if (cast<long>(this.genVertexArrays) == 0) { return false; }
+                return true;
+            }
+
+            // --- typed convenience wrappers: callers work in ints and arrays, never raw memory ---
+
+            // Create one vertex array / buffer and return its name (hides the 4-byte scratch out-param).
+            public method genVertexArray() returns int {
+                address b = Allocator.alloc(4); this.genVertexArrays(1, cast<long>(b));
+                int id = Raw.read<int>(b); Allocator.free(b); return id;
+            }
+            public method genBuffer() returns int {
+                address b = Allocator.alloc(4); this.genBuffers(1, cast<long>(b));
+                int id = Raw.read<int>(b); Allocator.free(b); return id;
+            }
+            // Delete one vertex array / buffer by name (the typed form of the count+pointer GL calls).
+            public method deleteVertexArray(int id) returns void {
+                address b = Allocator.alloc(4); Raw.write<int>(b, id);
+                this.deleteVertexArrays(1, cast<long>(b)); Allocator.free(b);
+            }
+            public method deleteBuffer(int id) returns void {
+                address b = Allocator.alloc(4); Raw.write<int>(b, id);
+                this.deleteBuffers(1, cast<long>(b)); Allocator.free(b);
+            }
+
+            // Upload a Polaron array to the currently-bound buffer `target`. Copies through a temporary
+            // native buffer, so the caller assembles vertices in a typed float[]/int[] and never touches
+            // raw memory; the copy is a one-time mesh-setup cost, not a per-frame one.
+            public method bufferDataFloats(int target, float[] data, int usage) returns void {
+                int n = data.length(); long bytes = cast<long>(n * 4);
+                address buf = Allocator.alloc(bytes);
+                mutable int i = 0;
+                while (i < n) { Raw.write<float>(buf + cast<address>(i * 4), data[i]); i = i + 1; }
+                this.bufferData(target, bytes, cast<long>(buf), usage); Allocator.free(buf);
+            }
+            public method bufferDataInts(int target, int[] data, int usage) returns void {
+                int n = data.length(); long bytes = cast<long>(n * 4);
+                address buf = Allocator.alloc(bytes);
+                mutable int i = 0;
+                while (i < n) { Raw.write<int>(buf + cast<address>(i * 4), data[i]); i = i + 1; }
+                this.bufferData(target, bytes, cast<long>(buf), usage); Allocator.free(buf);
+            }
+
+            // Read back a w*h RGB block (tight-packed) as bytes -- the typed form of glReadPixels, for
+            // the offscreen screenshot path.
+            public method readPixelsRgb(int x, int y, int w, int h) returns byte[] {
+                int n = w * h * 3;
+                address buf = Allocator.alloc(cast<long>(n));
+                Wgl.glPixelStorei(GlEnum.PACK_ALIGNMENT, 1);
+                Wgl.glReadPixels(x, y, w, h, GlEnum.RGB, GlEnum.UNSIGNED_BYTE, cast<long>(buf));
+                byte[] out = new byte[n]();
+                mutable int i = 0;
+                while (i < n) { out[i] = Raw.read<byte>(buf + cast<address>(i)); i = i + 1; }
+                Allocator.free(buf); return out;
+            }
+        }
+    }
+}

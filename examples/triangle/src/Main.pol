@@ -1,0 +1,146 @@
+import OpenGL.Core.Gl;
+import OpenGL.Core.Wgl;
+import OpenGL.Core.GlEnum;
+import OpenGL.Windowing.GlWindow;
+import OpenGL.Shaders.Shader;
+import System.IO.Console;
+import System.IO.Files;
+import System.Memory.Buffer;
+
+program TriangleDemo;
+
+// The smallest thing that proves the library: a real window, a real 4.6 core context, a GLSL program
+// compiled by the driver, and a triangle drawn through a vertex array.
+//
+// AND IT CHECKS ITS OWN OUTPUT. A demo that opens a window and says "ok" proves that the window opened.
+// This one reads the frame back off the GPU and looks at two pixels -- one inside the triangle, one in a
+// corner outside it -- so a run that renders nothing fails out loud instead of exiting 0. The frame is
+// also written to triangle.png, for the case where the numbers are right and the picture is still wrong.
+//
+//   polaron run .            open the window, draw, verify, write triangle.png
+public bundle TriangleDemo {
+    public namespace Demo {
+
+        public class Main {
+            private static final int WIDTH = 640;
+            private static final int HEIGHT = 480;
+            private static final int FRAMES = 3;
+
+            // Polaron's blue, #395fdb, as the fragment colour -- so the pixel check has a value to
+            // expect that could not have come from a cleared buffer.
+            private static final int FILL_R = 57;
+            private static final int FILL_G = 95;
+            private static final int FILL_B = 219;
+
+            public static method main(string[] args) returns void {
+                mutable GlWindow* win = new GlWindow() on heap;
+                if (!win.open("Polaron-OpenGL: triangle", Main.WIDTH, Main.HEIGHT, 4, 6)) {
+                    System.IO.Console.println("no OpenGL 4.6 context on this machine");
+                    delete win;
+                    return;
+                }
+
+                int shader = Shader.fromSource(win.gl, Main.vertexSource(), Main.fragmentSource());
+                int vao = win.gl.genVertexArray();
+                win.gl.bindVertexArray(vao);
+                int vbo = win.gl.genBuffer();
+                win.gl.bindBuffer(GlEnum.ARRAY_BUFFER, vbo);
+
+                mutable float[] corners = new float[6]();
+                corners[0] = 0.0 - 0.8; corners[1] = 0.0 - 0.7;
+                corners[2] = 0.8;       corners[3] = 0.0 - 0.7;
+                corners[4] = 0.0;       corners[5] = 0.8;
+                win.gl.bufferDataFloats(GlEnum.ARRAY_BUFFER, corners, GlEnum.STATIC_DRAW);
+                delete corners;
+
+                win.gl.vertexAttribPointer(0, 2, GlEnum.FLOAT, cast<byte>(0), 8, 0);
+                win.gl.enableVertexAttribArray(0);
+
+                mutable byte[] frame = new byte[0]();
+                for (mutable int f = 0; f < Main.FRAMES; f++) {
+                    win.pump();
+                    Wgl.glViewport(0, 0, Main.WIDTH, Main.HEIGHT);
+                    Wgl.glClearColor(0.06, 0.06, 0.08, 1.0);
+                    Wgl.glClear(GlEnum.COLOR_BUFFER_BIT | GlEnum.DEPTH_BUFFER_BIT);
+                    win.gl.useProgram(shader);
+                    win.gl.bindVertexArray(vao);
+                    Wgl.glDrawArrays(GlEnum.TRIANGLES, 0, 3);
+                    if (f == Main.FRAMES - 1) {
+                        // Before the swap: what was just drawn is in the buffer being read.
+                        delete frame;
+                        frame = win.gl.readPixelsRgb(0, 0, Main.WIDTH, Main.HEIGHT);
+                    }
+                    win.swap();
+                }
+
+                boolean drew = Main.verify(frame);
+                Main.writePng(frame, "triangle.png");
+                delete frame;
+
+                win.gl.deleteBuffer(vbo);
+                win.gl.deleteVertexArray(vao);
+                win.gl.deleteProgram(shader);
+                delete win;
+
+                if (drew) {
+                    System.IO.Console.println("the triangle is on the screen");
+                } else {
+                    System.IO.Console.println("FAILED: the frame does not hold a triangle");
+                }
+                return;
+            }
+
+            // The centre of the frame is inside the triangle and must carry the fill colour; a bottom
+            // corner is outside it and must still carry the clear colour. Both, or the render did not
+            // happen the way the code says it did.
+            private static method verify(byte[] frame) returns boolean {
+                int centre = ((Main.HEIGHT / 2) * Main.WIDTH + Main.WIDTH / 2) * 3;
+                int corner = 0;   // bottom-left: glReadPixels counts rows from the bottom
+                int cr = cast<int>(frame[centre]) & 255;
+                int cg = cast<int>(frame[centre + 1]) & 255;
+                int cb = cast<int>(frame[centre + 2]) & 255;
+                int er = cast<int>(frame[corner]) & 255;
+                int eg = cast<int>(frame[corner + 1]) & 255;
+                int eb = cast<int>(frame[corner + 2]) & 255;
+                System.IO.Console.println($"centre = {cr},{cg},{cb}   corner = {er},{eg},{eb}");
+                boolean filled = Main.near(cr, Main.FILL_R) && Main.near(cg, Main.FILL_G)
+                              && Main.near(cb, Main.FILL_B);
+                boolean cleared = er < 32 && eg < 32 && eb < 32;
+                return filled && cleared;
+            }
+
+            // sRGB conversion and the driver's own rounding move a channel by a unit or two; an exact
+            // comparison would fail on a correct frame.
+            private static method near(int got, int want) returns boolean {
+                int d = got - want;
+                if (d < 0) { return 0 - d <= 3; }
+                return d <= 3;
+            }
+
+            private static method writePng(byte[] frame, String path) returns void {
+                mutable int[] bytes = FramePng.encode(frame, Main.WIDTH, Main.HEIGHT);
+                mutable Buffer* b = new Buffer(bytes.length()) on heap;
+                for (mutable int i = 0; i < bytes.length(); i++) {
+                    b.writeByte(i, cast<byte>(bytes[i] & 255));
+                }
+                boolean ok = Files.writeBytes(path, b, bytes.length());
+                delete b;
+                delete bytes;
+                if (ok) {
+                    System.IO.Console.println($"wrote {path}");
+                } else {
+                    System.IO.Console.println($"could not write {path}");
+                }
+                return;
+            }
+
+            private static method vertexSource() returns String {
+                return "#version 460 core\nlayout(location = 0) in vec2 corner;\nvoid main() { gl_Position = vec4(corner, 0.0, 1.0); }\n";
+            }
+
+            private static method fragmentSource() returns String {
+                return "#version 460 core\nout vec4 colour;\nvoid main() { colour = vec4(0.2235, 0.3725, 0.8588, 1.0); }\n";
+            }
+        }
+    }
+}

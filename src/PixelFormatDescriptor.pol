@@ -1,0 +1,26 @@
+program PolaronOpenGL;
+
+// A Win32 PIXELFORMATDESCRIPTOR (40 bytes on x64). Only a few fields matter for a core context: the
+// size, the flags, and the colour and depth bit counts. The rest are here because the struct is passed
+// to ChoosePixelFormat by address and the OS reads all of it.
+public bundle OpenGL {
+    public namespace Core {
+
+        public struct PixelFormatDescriptor {
+            public mutable short nSize;        public mutable short nVersion;
+            public mutable int dwFlags;
+            public mutable byte iPixelType;    public mutable byte cColorBits;
+            public mutable byte cRedBits;      public mutable byte cRedShift;
+            public mutable byte cGreenBits;    public mutable byte cGreenShift;
+            public mutable byte cBlueBits;     public mutable byte cBlueShift;
+            public mutable byte cAlphaBits;    public mutable byte cAlphaShift;
+            public mutable byte cAccumBits;    public mutable byte cAccumRedBits;
+            public mutable byte cAccumGreenBits; public mutable byte cAccumBlueBits;
+            public mutable byte cAccumAlphaBits; public mutable byte cDepthBits;
+            public mutable byte cStencilBits;  public mutable byte cAuxBuffers;
+            public mutable byte iLayerType;    public mutable byte bReserved;
+            public mutable int dwLayerMask;    public mutable int dwVisibleMask;
+            public mutable int dwDamageMask;
+        }
+    }
+}

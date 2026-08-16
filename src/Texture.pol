@@ -1,0 +1,160 @@
+import OpenGL.Core.Gl;
+import OpenGL.Core.Wgl;
+import OpenGL.Core.GlEnum;
+import System.IO.Console;
+import System.Memory.Allocator;
+import System.Memory.Raw;
+
+program PolaronOpenGL;
+
+// Load image files into OpenGL textures -- the stb_image-equivalent, except that the decoder is the one
+// already on the machine. Texture decodes the file through the GDI+ flat API (no C, no third-party image
+// library), packs the rows, and uploads them.
+//
+// GDI+ stores 24bpp as BGR and 32bpp as BGRA, so both are uploaded with the matching GL format rather
+// than swizzled by hand.
+public bundle OpenGL {
+    public namespace Textures {
+
+        public class Texture {
+            // GDI+ pixel formats, as the flat API spells them.
+            private static final int PIXEL_24BPP_RGB = 0x21808;
+            private static final int PIXEL_32BPP_ARGB = 0x26200A;
+            private static final int LOCK_READ = 1;
+
+            // GDI+ must be started once per process before any decode.
+            public static method startup() returns long {
+                address inp = Allocator.alloc(24);
+                mutable int z = 0; while (z < 24) { Raw.write<byte>(inp + cast<address>(z), cast<byte>(0)); z = z + 1; }
+                Raw.write<int>(inp, 1);   // GdiplusVersion = 1
+                address tok = Allocator.alloc(8); Raw.write<long>(tok, 0);
+                GdiPlus.GdiplusStartup(cast<long>(tok), cast<long>(inp), 0);
+                long t = Raw.read<long>(tok);
+                Allocator.free(inp); Allocator.free(tok);
+                return t;
+            }
+            public static method shutdown(long token) returns void { GdiPlus.GdiplusShutdown(token); }
+
+            // Convert an ASCII path to a NUL-terminated UTF-16LE buffer (what the GDI+ *W APIs expect).
+            private static method toWide(String s) returns address {
+                int n = s.length();
+                address w = Allocator.alloc(cast<long>((n + 1) * 2));
+                mutable int i = 0;
+                while (i < n) {
+                    Raw.write<byte>(w + cast<address>(i * 2), cast<byte>(cast<int>(s.charAt(i))));
+                    Raw.write<byte>(w + cast<address>(i * 2 + 1), cast<byte>(0));
+                    i = i + 1;
+                }
+                Raw.write<byte>(w + cast<address>(n * 2), cast<byte>(0));
+                Raw.write<byte>(w + cast<address>(n * 2 + 1), cast<byte>(0));
+                return w;
+            }
+
+            // Decode `path` into a tight buffer of `bytesPerPixel`-byte pixels. The caller disposes it.
+            private static method decode(String path, int pixelFormat, int bytesPerPixel) returns DecodedImage* {
+                address wp = Texture.toWide(path);
+                address bmpOut = Allocator.alloc(8); Raw.write<long>(bmpOut, 0);
+                int status = GdiPlus.GdipCreateBitmapFromFile(cast<long>(wp), cast<long>(bmpOut));
+                long bmp = Raw.read<long>(bmpOut);
+                Allocator.free(wp); Allocator.free(bmpOut);
+                if (bmp == 0) {
+                    System.IO.Console.printf("gltex: failed to load %s (status %d)\n", path, status);
+                    return new DecodedImage(cast<address>(0), 0, 0) on heap;
+                }
+                address wo = Allocator.alloc(4); address ho = Allocator.alloc(4);
+                GdiPlus.GdipGetImageWidth(bmp, cast<long>(wo)); GdiPlus.GdipGetImageHeight(bmp, cast<long>(ho));
+                int iw = Raw.read<int>(wo); int ih = Raw.read<int>(ho);
+                Allocator.free(wo); Allocator.free(ho);
+                address rect = Allocator.alloc(16);
+                Raw.write<int>(rect, 0); Raw.write<int>(rect + cast<address>(4), 0);
+                Raw.write<int>(rect + cast<address>(8), iw); Raw.write<int>(rect + cast<address>(12), ih);
+                address bd = Allocator.alloc(32);
+                mutable int q = 0; while (q < 32) { Raw.write<byte>(bd + cast<address>(q), cast<byte>(0)); q = q + 1; }
+                GdiPlus.GdipBitmapLockBits(bmp, cast<long>(rect), Texture.LOCK_READ, pixelFormat, cast<long>(bd));
+                int stride = Raw.read<int>(bd + cast<address>(8));
+                long scan0 = Raw.read<long>(bd + cast<address>(16));
+                // Pack the rows (GDI+ pads each one to a multiple of 4 bytes) into a tight buffer.
+                long rowBytes = cast<long>(iw * bytesPerPixel);
+                address packed = Allocator.alloc(rowBytes * cast<long>(ih));
+                mutable int y = 0;
+                while (y < ih) {
+                    Allocator.copy(packed + cast<address>(cast<long>(y) * rowBytes),
+                                   cast<address>(scan0 + cast<long>(y) * cast<long>(stride)), rowBytes);
+                    y = y + 1;
+                }
+                GdiPlus.GdipBitmapUnlockBits(bmp, cast<long>(bd));
+                GdiPlus.GdipDisposeImage(bmp);
+                Allocator.free(rect); Allocator.free(bd);
+                return new DecodedImage(packed, iw, ih) on heap;
+            }
+
+            // Create a texture name and bind it, with UNPACK_ALIGNMENT set for tight rows.
+            private static method bindNewTexture() returns int {
+                address idbuf = Allocator.alloc(4);
+                Wgl.glGenTextures(1, cast<long>(idbuf));
+                int tex = Raw.read<int>(idbuf); Allocator.free(idbuf);
+                Wgl.glBindTexture(GlEnum.TEXTURE_2D, tex);
+                Wgl.glPixelStorei(GlEnum.UNPACK_ALIGNMENT, 1);
+                return tex;
+            }
+
+            private static method setFilter(int minFilter, int magFilter, int wrap) returns void {
+                Wgl.glTexParameteri(GlEnum.TEXTURE_2D, GlEnum.TEXTURE_MIN_FILTER, minFilter);
+                Wgl.glTexParameteri(GlEnum.TEXTURE_2D, GlEnum.TEXTURE_MAG_FILTER, magFilter);
+                Wgl.glTexParameteri(GlEnum.TEXTURE_2D, GlEnum.TEXTURE_WRAP_S, wrap);
+                Wgl.glTexParameteri(GlEnum.TEXTURE_2D, GlEnum.TEXTURE_WRAP_T, wrap);
+            }
+
+            // Decode `path` and upload it as a mipmapped 2D texture; returns the GL texture id (0 on failure).
+            public static method load2D(Gl* gl, String path) returns int {
+                mutable DecodedImage* img = Texture.decode(path, Texture.PIXEL_24BPP_RGB, 3);
+                if (!img.ok()) { delete img; return 0; }
+                int tex = Texture.bindNewTexture();
+                Wgl.glTexImage2D(GlEnum.TEXTURE_2D, 0, GlEnum.RGB, img.width, img.height, 0,
+                                 GlEnum.BGR, GlEnum.UNSIGNED_BYTE, cast<long>(img.pixels));
+                Texture.setFilter(GlEnum.LINEAR_MIPMAP_LINEAR, GlEnum.LINEAR, GlEnum.REPEAT);
+                gl.generateMipmap(GlEnum.TEXTURE_2D);
+                img.dispose();
+                delete img;
+                return tex;
+            }
+
+            // Decode `path` PRESERVING ALPHA and upload it as an RGBA texture with NEAREST filtering and
+            // clamp-to-edge -- what a sprite atlas of transparent pixel art needs. Returns the GL id.
+            public static method load2DRGBA(Gl* gl, String path) returns int {
+                mutable DecodedImage* img = Texture.decode(path, Texture.PIXEL_32BPP_ARGB, 4);
+                if (!img.ok()) { delete img; return 0; }
+                int tex = Texture.bindNewTexture();
+                Wgl.glTexImage2D(GlEnum.TEXTURE_2D, 0, GlEnum.RGBA, img.width, img.height, 0,
+                                 GlEnum.BGRA, GlEnum.UNSIGNED_BYTE, cast<long>(img.pixels));
+                Texture.setFilter(GlEnum.NEAREST, GlEnum.NEAREST, GlEnum.CLAMP_TO_EDGE);
+                img.dispose();
+                delete img;
+                return tex;
+            }
+
+            // Upload a caller-supplied RGBA byte buffer (row-major, R,G,B,A per pixel) as a 2D texture with
+            // NEAREST filtering and clamp-to-edge. For glyph atlases and procedurally-built images -- no
+            // file decode. Returns the GL texture id.
+            //
+            // It takes no `Gl`: everything it calls is OpenGL 1.1, exported directly. The loader used to
+            // carry a copy of this method for the same reason it took a loader it never used -- because
+            // the two were written at different times. Uploading pixels is the texture's business.
+            public static method upload2DRGBA(byte[] pixels, int w, int h) returns int {
+                int total = w * h * 4;
+                address buf = Allocator.alloc(cast<long>(total));
+                mutable int i = 0;
+                while (i < total) {
+                    Raw.write<byte>(buf + cast<address>(i), pixels[i]);
+                    i = i + 1;
+                }
+                int tex = Texture.bindNewTexture();
+                Wgl.glTexImage2D(GlEnum.TEXTURE_2D, 0, GlEnum.RGBA, w, h, 0,
+                                 GlEnum.RGBA, GlEnum.UNSIGNED_BYTE, cast<long>(buf));
+                Texture.setFilter(GlEnum.NEAREST, GlEnum.NEAREST, GlEnum.CLAMP_TO_EDGE);
+                Allocator.free(buf);
+                return tex;
+            }
+        }
+    }
+}

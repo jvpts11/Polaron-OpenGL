@@ -1,0 +1,22 @@
+program PolaronOpenGL;
+
+// GDI pixel-format selection: opengl32 needs a pixel format set on the device context before a context
+// can be created on it.
+//
+// `library Gdi` names the foreign library these externs come from. The logical name is ours; the file it
+// resolves to (gdi32 on Windows) is in polaron.toml, because that is the part that differs per platform.
+public bundle OpenGL {
+    public namespace Core {
+
+        public class Gdi library Gdi {
+            // The descriptor crosses as an `address`, not a `PixelFormatDescriptor*`. Past the extern
+            // there is no Polaron left to reason about: nothing can say whether the OS keeps the pointer,
+            // so the region binder cannot prove the storage outlives what holds it, and is right to
+            // refuse. `address` is how a program says the lifetime is somebody else's -- which, for a
+            // descriptor the OS reads during the call and never retains, is exactly the truth.
+            public extern cdecl static method ChoosePixelFormat(long hdc, address p) returns int;
+            public extern cdecl static method SetPixelFormat(long hdc, int fmt, address p) returns int;
+            public extern cdecl static method SwapBuffers(long hdc) returns int;
+        }
+    }
+}
