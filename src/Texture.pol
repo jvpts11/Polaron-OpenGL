@@ -105,7 +105,9 @@ public bundle OpenGL {
                 Wgl.glTexParameteri(GlEnum.TEXTURE_2D, GlEnum.TEXTURE_WRAP_T, wrap);
             }
 
-            // Decode `path` and upload it as a mipmapped 2D texture; returns the GL texture id (0 on failure).
+            // Decode `path` and upload it as a mipmapped 2D texture; returns the GL texture id (0 on
+            // failure). This one takes the loader because building the mipmap chain is a modern call;
+            // the two below do not, and do not pretend to.
             public static method load2D(Gl* gl, String path) returns int {
                 mutable DecodedImage* img = Texture.decode(path, Texture.PIXEL_24BPP_RGB, 3);
                 if (!img.ok()) { delete img; return 0; }
@@ -121,7 +123,7 @@ public bundle OpenGL {
 
             // Decode `path` PRESERVING ALPHA and upload it as an RGBA texture with NEAREST filtering and
             // clamp-to-edge -- what a sprite atlas of transparent pixel art needs. Returns the GL id.
-            public static method load2DRGBA(Gl* gl, String path) returns int {
+            public static method load2DRGBA(String path) returns int {
                 mutable DecodedImage* img = Texture.decode(path, Texture.PIXEL_32BPP_ARGB, 4);
                 if (!img.ok()) { delete img; return 0; }
                 int tex = Texture.bindNewTexture();
